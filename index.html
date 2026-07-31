@@ -118,25 +118,57 @@ window.OI_CUSTOM_SECS = JSON.parse(localStorage.getItem('oi_custom_secs')||'{}')
 window.OI_MAT_OVERRIDE = JSON.parse(localStorage.getItem('oi_mat_override')||'{}');
 window.OI_MODE = localStorage.getItem('oi_mode') || 'volunteer';
 
-/* ── Orden Programas → Coordinación: migración única ── */
-function migrateOrder(){
-  if(localStorage.getItem('oi_order_v2')) return;
-  if(!window.__oi_state || !window.__oi_setState) return;
-  var defs = window.__oi_state.matDefs.map(function(m){
-    var m2 = Object.assign({}, m);
-    var nm = (m2.name||'').trim();
-    if(nm==='Pinta book') m2.cat='Carpeta de Programas';
-    if(nm==='Block de dibujo') m2.cat='Materiales para actividades';
-    return m2;
-  });
-  var prog=[], coord=[];
-  defs.forEach(function(m){
-    if(getSectionForMaterial(m.name,m.cat)==='A cargo de Coordinación') coord.push(m);
-    else prog.push(m);
-  });
-  window.__oi_setState(Object.assign({}, window.__oi_state, {matDefs: prog.concat(coord)}));
-  localStorage.setItem('oi_order_v2','1');
-}
+/* ── Proteccion de datos ──────────────────────────────────────────
+   La migracion de orden (migrateOrder) fue eliminada: se ejecutaba
+   sola a los 700ms y, en un navegador sin cache, podia dispararse
+   ANTES de que llegara la respuesta de la base de datos. En ese caso
+   guardaba el estado por defecto (vacio) encima de los datos reales.
+   El orden Programas -> Coordinacion ya quedo guardado en los datos,
+   asi que la migracion ya no hace falta.
+
+   Ademas, este guardia bloquea cualquier intento de guardar un estado
+   sin stock encima de una base que si tiene datos.                  */
+(function(){
+  var _fetch = window.fetch;
+  var baseTieneDatos = false;
+
+  function contarRegistros(st){
+    if(!st || !st.zoneStocks) return 0;
+    return Object.keys(st.zoneStocks).reduce(function(a,z){
+      return a + Object.keys(st.zoneStocks[z]||{}).length;
+    }, 0);
+  }
+  function extraerData(j){
+    if(!j) return null;
+    if(Array.isArray(j)) return j[0] && j[0].data;
+    return j.data;
+  }
+
+  window.fetch = function(input, init){
+    var url = (typeof input === 'string') ? input : ((input && input.url) || '');
+    var metodo = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+    var esTabla = url.indexOf('/rest/v1/oi_state') !== -1;
+
+    if(esTabla && metodo !== 'GET' && init && typeof init.body === 'string'){
+      try{
+        var saliente = contarRegistros(JSON.parse(init.body).data);
+        if(baseTieneDatos && saliente === 0){
+          console.warn('[OI] Guardado bloqueado: se intento escribir 0 registros sobre una base con datos.');
+          return Promise.resolve(new Response(null, {status:409, statusText:'Bloqueado por proteccion de datos'}));
+        }
+      }catch(e){}
+    }
+
+    return _fetch.apply(this, arguments).then(function(resp){
+      if(esTabla && metodo === 'GET' && resp.ok){
+        resp.clone().json().then(function(j){
+          if(contarRegistros(extraerData(j)) > 0) baseTieneDatos = true;
+        }).catch(function(){});
+      }
+      return resp;
+    });
+  };
+})();
 
 /* ── Mi Caja: inject section headers ───────────── */
 function injectSections(){
@@ -229,7 +261,6 @@ setInterval(function(){
   var now = Date.now();
   if(now - _lastInject < 600) return;
   _lastInject = now;
-  migrateOrder();
   injectSections();
   injectReposicionSections();
 }, 700);
