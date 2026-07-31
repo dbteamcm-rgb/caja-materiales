@@ -266,6 +266,43 @@ function applyMode(){
     modeBtn.textContent = isHost?'👑 Jefe':'👤 Voluntario';
     modeBtn.style.background = isHost?'#7E135D':'#1748A8';
   }
+  var bkBtn = document.getElementById('oi-backup-btn');
+  if(bkBtn) bkBtn.style.display = isHost?'flex':'none';
+}
+
+/* ── Respaldo: descarga una copia de todos los datos (solo jefe) ── */
+function downloadBackup(){
+  if(window.OI_MODE!=='host') return;
+  var st = window.__oi_state;
+  if(!st || !st.matDefs){ alert('Los datos aun no terminan de cargar. Intenta de nuevo en unos segundos.'); return; }
+  var stocks = st.zoneStocks||{};
+  var registros = Object.keys(stocks).reduce(function(a,z){ return a + Object.keys(stocks[z]||{}).length; }, 0);
+  var payload = {
+    respaldadoEl: new Date().toISOString(),
+    origen: location.href,
+    resumen: {
+      materiales: st.matDefs.length,
+      zonas: (st.zones||[]).length,
+      zonasConStock: Object.keys(stocks).length,
+      registrosDeStock: registros,
+      movimientosHistorial: (st.historial||[]).length
+    },
+    oi_app_v2: st,
+    oi_custom_secs: JSON.parse(localStorage.getItem('oi_custom_secs')||'{}'),
+    oi_mat_override: JSON.parse(localStorage.getItem('oi_mat_override')||'{}')
+  };
+  var url = URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'respaldo-caja-materiales-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+  var bkBtn = document.getElementById('oi-backup-btn');
+  if(bkBtn){
+    var prev = bkBtn.innerHTML;
+    bkBtn.innerHTML = '✓ '+registros+' registros guardados';
+    setTimeout(function(){ bkBtn.innerHTML = prev; }, 2500);
+  }
 }
 
 /* ── Edit modal ──────────────────────────────────── */
@@ -318,6 +355,15 @@ setTimeout(function(){
   btn.style.cssText='position:fixed;bottom:80px;right:16px;background:#7E135D;color:white;border:none;border-radius:50px;padding:10px 18px;font-weight:700;cursor:pointer;font-size:13px;z-index:9999;box-shadow:0 4px 15px rgba(0,0,0,.35);display:flex;align-items:center;gap:6px;';
   btn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Materiales';
   document.body.appendChild(btn);
+
+  /* Boton de respaldo (solo visible en modo Jefe) */
+  var bkBtn = document.createElement('button');
+  bkBtn.id='oi-backup-btn';
+  bkBtn.title='Descarga un archivo con todos los materiales, zonas y stock';
+  bkBtn.style.cssText='position:fixed;bottom:132px;right:16px;background:#1748A8;color:white;border:none;border-radius:50px;padding:10px 18px;font-weight:700;cursor:pointer;font-size:13px;z-index:9999;box-shadow:0 4px 15px rgba(0,0,0,.35);display:none;align-items:center;gap:6px;';
+  bkBtn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M12 3v12"/><path d="M7 12l5 5 5-5"/><path d="M4 21h16"/></svg> Respaldo';
+  bkBtn.onclick=downloadBackup;
+  document.body.appendChild(bkBtn);
 
   /* Main overlay */
   var ov = document.createElement('div');
